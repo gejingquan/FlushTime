@@ -1,0 +1,186 @@
+From b496021a44d3cd33bc49325402567a3eeb585390 Mon Sep 17 00:00:00 2001
+From: gerty1986823 <gerty1986823@126.com>
+Date: Mon, 22 Nov 2021 10:08:12 +0000
+Subject: [PATCH] KPTIdis_FlushTime
+
+Signed-off-by: gerty1986823 <gerty1986823@126.com>
+---
+ Makefile                  |  2 +-
+ arch/arm64/kernel/traps.c | 56 ++++++++++++++++++++++++++++++++++++-
+ kernel/sched/core.c       | 59 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 115 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e0216df27..89d0adcbb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ VERSION = 5
+ PATCHLEVEL = 4
+ SUBLEVEL = 128
+-EXTRAVERSION =
++EXTRAVERSION = KPTIdis_FlushTime
+ NAME = Kleptomaniac Octopus
+ 
+ # *DOCUMENTATION*
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+index 4e3e9d9c8..f215f828c 100644
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -43,6 +43,14 @@
+ #include <asm/system_misc.h>
+ #include <asm/sysreg.h>
+ 
++
++unsigned long FlushTime_flag;
++unsigned long FlushTime_enable;
++
++EXPORT_SYMBOL(FlushTime_flag);
++EXPORT_SYMBOL(FlushTime_enable);
++
++
+ static const char *handler[]= {
+ 	"Synchronous Abort",
+ 	"IRQ",
+@@ -433,6 +441,24 @@ static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
+ 	int crm = (esr & ESR_ELx_SYS64_ISS_CRM_MASK) >> ESR_ELx_SYS64_ISS_CRM_SHIFT;
+ 	int ret = 0;
+ 
++	if(FlushTime_enable==0xdeadbeaf){
++		FlushTime_flag=0xdeadbeaf;
++/*		
++		 char str1[20];
++		 char str2[20];
++		 char str3[20];
++		 strcpy(str1, "flush+reload");
++		 strcpy(str2, "flush+flush");
++		 strcpy(str3, "spectre");	
++		 if( strcmp(current->comm,str1)==0 || \
++			   strcmp(current->comm,str2)==0 || \
++			   strcmp(current->comm,str3)==0){
++			 pr_crit("In user_cache_maint_handler, current->pid=%lx, FlushTime_flag=%lx",\
++						(unsigned long)current->pid,FlushTime_flag);	
++		 }
++*/		 
++	}
++
+ 	address = untagged_addr(pt_regs_read_reg(regs, rt));
+ 
+ 	switch (crm) {
+@@ -488,7 +514,35 @@ static void cntvct_read_handler(unsigned int esr, struct pt_regs *regs)
+ {
+ 	int rt = ESR_ELx_SYS64_ISS_RT(esr);
+ 
+-	pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	//pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	
++	if(FlushTime_enable==0xdeadbeaf){	
++/*
++		 char str1[20];
++		 char str2[20];
++		 char str3[20];
++		 strcpy(str1, "flush+reload");
++		 strcpy(str2, "flush+flush");
++		 strcpy(str3, "spectre");	
++		 if( strcmp(current->comm,str1)==0 || \
++			   strcmp(current->comm,str2)==0 || \
++			   strcmp(current->comm,str3)==0){
++			 pr_crit("In cntvct_read_handler, current->pid=%lx,FlushTime_flag=%lx",\
++						(unsigned long)current->pid,FlushTime_flag);	
++		}
++*/		
++		if(FlushTime_flag!=0x0){
++			pt_regs_write_reg(regs, rt, (arch_timer_read_counter()&(~0xfff)));
++		}
++		else{
++			pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++		}
++	}
++	else{
++		pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	}	
++	
++	
+ 	arm64_skip_faulting_instruction(regs, AARCH64_INSN_SIZE);
+ }
+ 
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 490862bb5..3e85c5d71 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -52,6 +52,13 @@ const_debug unsigned int sysctl_sched_features =
+ #undef SCHED_FEAT
+ #endif
+ 
++
++
++extern unsigned long FlushTime_enable;
++extern unsigned long FlushTime_flag;
++
++
++
+ /*
+  * Number of tasks to iterate in a single balance run.
+  * Limited because this is done with IRQs disabled.
+@@ -3417,6 +3424,58 @@ static __always_inline struct rq *
+ context_switch(struct rq *rq, struct task_struct *prev,
+ 	       struct task_struct *next, struct rq_flags *rf)
+ {
++	
++	
++	
++	if(FlushTime_enable==0xdeadbeaf){	
++		char str1[15];
++		char str2[15];
++		char str3[15];
++		strcpy(str1, "flush+reload");
++		strcpy(str2, "flush+flush");
++		strcpy(str3, "spectre");	
++		if( strcmp(prev->comm,str1)==0 || \
++			strcmp(prev->comm,str2)==0 || \
++			strcmp(prev->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	 current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \			
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}
++		if( strcmp(current->comm,str1)==0 || \
++			strcmp(current->comm,str2)==0 || \
++			strcmp(current->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}
++		if( strcmp(next->comm,str1)==0 || \
++			strcmp(next->comm,str2)==0 || \
++			strcmp(next->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}	
++
++ 		if(FlushTime_flag!=0x0)
++ 			FlushTime_flag=FlushTime_flag-1;
++		if(FlushTime_flag==0xdeadbe4f)
++ 			FlushTime_flag=0x0;					
++	}	
++	
++	
++	
++	
++	
++	
+ 	prepare_task_switch(rq, prev, next);
+ 
+ 	/*
+-- 
+2.25.1
+

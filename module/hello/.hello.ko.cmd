@@ -1,0 +1,1 @@
+cmd_/home/gejingquan/module/hello/hello.ko := ld -r  -EL  -maarch64linux -T ./scripts/module-common.lds -T ./arch/arm64/kernel/module.lds  --build-id  -o /home/gejingquan/module/hello/hello.ko /home/gejingquan/module/hello/hello.o /home/gejingquan/module/hello/hello.mod.o ;  true

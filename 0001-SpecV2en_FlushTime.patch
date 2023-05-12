@@ -1,0 +1,281 @@
+From 9f4af10dd15f109b186db3f0229238e5309f2be5 Mon Sep 17 00:00:00 2001
+From: gerty1986823 <gerty1986823@126.com>
+Date: Fri, 3 Dec 2021 08:14:44 +0000
+Subject: [PATCH] SpecV2en_FlushTime
+
+Signed-off-by: gerty1986823 <gerty1986823@126.com>
+---
+ Makefile                       |  2 +-
+ arch/arm64/kernel/cpu_errata.c | 34 +++++++++++++++-----
+ arch/arm64/kernel/traps.c      | 56 +++++++++++++++++++++++++++++++-
+ kernel/sched/core.c            | 59 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 141 insertions(+), 10 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e0216df27..1ec117808 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,7 +2,7 @@
+ VERSION = 5
+ PATCHLEVEL = 4
+ SUBLEVEL = 128
+-EXTRAVERSION =
++EXTRAVERSION = SpecV2en_FlushTime
+ NAME = Kleptomaniac Octopus
+ 
+ # *DOCUMENTATION*
+diff --git a/arch/arm64/kernel/cpu_errata.c b/arch/arm64/kernel/cpu_errata.c
+index 1e16c4e00..abb6d6665 100644
+--- a/arch/arm64/kernel/cpu_errata.c
++++ b/arch/arm64/kernel/cpu_errata.c
+@@ -171,6 +171,7 @@ static void install_bp_hardening_cb(bp_hardening_cb_t fn,
+ 				      const char *hyp_vecs_start,
+ 				      const char *hyp_vecs_end)
+ {
++	pr_warn_once("install_bp_hardening_cb is running!\n");	
+ 	__this_cpu_write(bp_hardening_data.fn, fn);
+ }
+ #endif	/* CONFIG_KVM_INDIRECT_VECTORS */
+@@ -589,7 +590,7 @@ static const struct midr_range spectre_v2_safe_list[] = {
+ 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A53),
+ 	MIDR_ALL_VERSIONS(MIDR_CORTEX_A55),
+ 	MIDR_ALL_VERSIONS(MIDR_BRAHMA_B53),
+-	MIDR_ALL_VERSIONS(MIDR_HISI_TSV110),
++	//MIDR_ALL_VERSIONS(MIDR_HISI_TSV110),
+ 	{ /* sentinel */ }
+ };
+ 
+@@ -602,22 +603,32 @@ check_branch_predictor(const struct arm64_cpu_capabilities *entry, int scope)
+ {
+ 	int need_wa;
+ 
++	pr_warn_once("check_branch_predictor is running!\n");
++	
++	
+ 	WARN_ON(scope != SCOPE_LOCAL_CPU || preemptible());
+ 
+ 	/* If the CPU has CSV2 set, we're safe */
+ 	if (cpuid_feature_extract_unsigned_field(read_cpuid(ID_AA64PFR0_EL1),
+ 						 ID_AA64PFR0_CSV2_SHIFT))
+ 		return false;
+-
++	pr_warn_once("check_branch_predictor is running!\n");
++	
++	
+ 	/* Alternatively, we have a list of unaffected CPUs */
+ 	if (is_midr_in_range_list(read_cpuid_id(), spectre_v2_safe_list))
+ 		return false;
+-
++	pr_warn_once("check_branch_predictor is running!\n");
++	
++	
+ 	/* Fallback to firmware detection */
+ 	need_wa = detect_harden_bp_fw();
+-	if (!need_wa)
+-		return false;
+-
++	pr_warn_once("detect_harden_bp_fw = %d !\n", need_wa);	
++	// if (!need_wa)
++		// return false;
++	pr_warn_once("check_branch_predictor is running!\n");
++	
++	
+ 	__spectrev2_safe = false;
+ 
+ 	if (!IS_ENABLED(CONFIG_HARDEN_BRANCH_PREDICTOR)) {
+@@ -625,25 +636,32 @@ check_branch_predictor(const struct arm64_cpu_capabilities *entry, int scope)
+ 		__hardenbp_enab = false;
+ 		return false;
+ 	}
+-
++	pr_warn_once("check_branch_predictor is running!\n");
++	
++	
+ 	/* forced off */
+ 	if (__nospectre_v2 || cpu_mitigations_off()) {
+ 		pr_info_once("spectrev2 mitigation disabled by command line option\n");
+ 		__hardenbp_enab = false;
+ 		return false;
+ 	}
++	pr_warn_once("check_branch_predictor is running!\n");
+ 
++	
+ 	if (need_wa < 0) {
+ 		pr_warn_once("ARM_SMCCC_ARCH_WORKAROUND_1 missing from firmware\n");
+ 		__hardenbp_enab = false;
+ 	}
+ 
+-	return (need_wa > 0);
++	pr_warn_once("__hardenbp_enab=%d\n",__hardenbp_enab);
++	pr_warn_once("__spectrev2_safe=%d\n",__spectrev2_safe);
++	return (need_wa >= 0);
+ }
+ 
+ static void
+ cpu_enable_branch_predictor_hardening(const struct arm64_cpu_capabilities *cap)
+ {
++	pr_warn_once("cpu_enable_branch_predictor_hardening is running!\n");	
+ 	cap->matches(cap, SCOPE_LOCAL_CPU);
+ }
+ 
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+index 4e3e9d9c8..f215f828c 100644
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -43,6 +43,14 @@
+ #include <asm/system_misc.h>
+ #include <asm/sysreg.h>
+ 
++
++unsigned long FlushTime_flag;
++unsigned long FlushTime_enable;
++
++EXPORT_SYMBOL(FlushTime_flag);
++EXPORT_SYMBOL(FlushTime_enable);
++
++
+ static const char *handler[]= {
+ 	"Synchronous Abort",
+ 	"IRQ",
+@@ -433,6 +441,24 @@ static void user_cache_maint_handler(unsigned int esr, struct pt_regs *regs)
+ 	int crm = (esr & ESR_ELx_SYS64_ISS_CRM_MASK) >> ESR_ELx_SYS64_ISS_CRM_SHIFT;
+ 	int ret = 0;
+ 
++	if(FlushTime_enable==0xdeadbeaf){
++		FlushTime_flag=0xdeadbeaf;
++/*		
++		 char str1[20];
++		 char str2[20];
++		 char str3[20];
++		 strcpy(str1, "flush+reload");
++		 strcpy(str2, "flush+flush");
++		 strcpy(str3, "spectre");	
++		 if( strcmp(current->comm,str1)==0 || \
++			   strcmp(current->comm,str2)==0 || \
++			   strcmp(current->comm,str3)==0){
++			 pr_crit("In user_cache_maint_handler, current->pid=%lx, FlushTime_flag=%lx",\
++						(unsigned long)current->pid,FlushTime_flag);	
++		 }
++*/		 
++	}
++
+ 	address = untagged_addr(pt_regs_read_reg(regs, rt));
+ 
+ 	switch (crm) {
+@@ -488,7 +514,35 @@ static void cntvct_read_handler(unsigned int esr, struct pt_regs *regs)
+ {
+ 	int rt = ESR_ELx_SYS64_ISS_RT(esr);
+ 
+-	pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	//pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	
++	if(FlushTime_enable==0xdeadbeaf){	
++/*
++		 char str1[20];
++		 char str2[20];
++		 char str3[20];
++		 strcpy(str1, "flush+reload");
++		 strcpy(str2, "flush+flush");
++		 strcpy(str3, "spectre");	
++		 if( strcmp(current->comm,str1)==0 || \
++			   strcmp(current->comm,str2)==0 || \
++			   strcmp(current->comm,str3)==0){
++			 pr_crit("In cntvct_read_handler, current->pid=%lx,FlushTime_flag=%lx",\
++						(unsigned long)current->pid,FlushTime_flag);	
++		}
++*/		
++		if(FlushTime_flag!=0x0){
++			pt_regs_write_reg(regs, rt, (arch_timer_read_counter()&(~0xfff)));
++		}
++		else{
++			pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++		}
++	}
++	else{
++		pt_regs_write_reg(regs, rt, arch_timer_read_counter());
++	}	
++	
++	
+ 	arm64_skip_faulting_instruction(regs, AARCH64_INSN_SIZE);
+ }
+ 
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 490862bb5..3e85c5d71 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -52,6 +52,13 @@ const_debug unsigned int sysctl_sched_features =
+ #undef SCHED_FEAT
+ #endif
+ 
++
++
++extern unsigned long FlushTime_enable;
++extern unsigned long FlushTime_flag;
++
++
++
+ /*
+  * Number of tasks to iterate in a single balance run.
+  * Limited because this is done with IRQs disabled.
+@@ -3417,6 +3424,58 @@ static __always_inline struct rq *
+ context_switch(struct rq *rq, struct task_struct *prev,
+ 	       struct task_struct *next, struct rq_flags *rf)
+ {
++	
++	
++	
++	if(FlushTime_enable==0xdeadbeaf){	
++		char str1[15];
++		char str2[15];
++		char str3[15];
++		strcpy(str1, "flush+reload");
++		strcpy(str2, "flush+flush");
++		strcpy(str3, "spectre");	
++		if( strcmp(prev->comm,str1)==0 || \
++			strcmp(prev->comm,str2)==0 || \
++			strcmp(prev->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	 current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \			
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}
++		if( strcmp(current->comm,str1)==0 || \
++			strcmp(current->comm,str2)==0 || \
++			strcmp(current->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}
++		if( strcmp(next->comm,str1)==0 || \
++			strcmp(next->comm,str2)==0 || \
++			strcmp(next->comm,str3)==0){
++			pr_crit("In context_switch,prev->pid=%lx,\
++	current->pid=%lx,next->pid=%lx,FlushTime_flag=%lx", \
++				(unsigned long)prev->pid,\
++				(unsigned long)current->pid,\
++				(unsigned long)next->pid,\
++				FlushTime_flag);
++			}	
++
++ 		if(FlushTime_flag!=0x0)
++ 			FlushTime_flag=FlushTime_flag-1;
++		if(FlushTime_flag==0xdeadbe4f)
++ 			FlushTime_flag=0x0;					
++	}	
++	
++	
++	
++	
++	
++	
+ 	prepare_task_switch(rq, prev, next);
+ 
+ 	/*
+-- 
+2.25.1
+
